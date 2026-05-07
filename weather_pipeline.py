@@ -13,8 +13,6 @@ FORECAST_FILE = os.path.join(BASE_DIR, "forecast.csv")
 OBS_FILE = os.path.join(BASE_DIR, "observations.csv")
 
 
-#BASE_PATH = r"C:\Users\njoha\OneDrive - USN\energy_data\met_weather"
-#os.chdir(BASE_PATH)
 
 print("✅ Using working directory:", os.getcwd())
 
