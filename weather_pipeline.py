@@ -7,9 +7,14 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-BASE_PATH = r"C:\Users\njoha\OneDrive - USN\energy_data\met_weather"
-os.chdir(BASE_PATH)
+FORECAST_FILE = os.path.join(BASE_DIR, "forecast.csv")
+OBS_FILE = os.path.join(BASE_DIR, "observations.csv")
+
+
+#BASE_PATH = r"C:\Users\njoha\OneDrive - USN\energy_data\met_weather"
+#os.chdir(BASE_PATH)
 
 print("✅ Using working directory:", os.getcwd())
 
@@ -29,8 +34,12 @@ HEADERS = {
 }
 
 
-FORECAST_FILE = os.path.join(BASE_PATH, "forecast.csv")
-OBS_FILE = os.path.join(BASE_PATH, "observations.csv")
+FORECAST_FILE = "forecast.csv"
+OBS_FILE = "observations.csv"
+
+
+#FORECAST_FILE = os.path.join(BASE_PATH, "forecast.csv")
+#OBS_FILE = os.path.join(BASE_PATH, "observations.csv")
 
 
 # ======================
