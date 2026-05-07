@@ -6,6 +6,15 @@ import subprocess
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+
+
+BASE_PATH = r"C:\Users\njoha\OneDrive - USN\energy_data\met_weather"
+os.chdir(BASE_PATH)
+
+print("✅ Using working directory:", os.getcwd())
+
+
+
 # ======================
 # CONFIG
 # ======================
@@ -19,8 +28,10 @@ HEADERS = {
     "User-Agent": "usn_smart_grid_lab_porsgrunn nils.j.johannesen@usn.no"
 }
 
-FORECAST_FILE = "forecast.csv"
-OBS_FILE = "observations.csv"
+
+FORECAST_FILE = os.path.join(BASE_PATH, "forecast.csv")
+OBS_FILE = os.path.join(BASE_PATH, "observations.csv")
+
 
 # ======================
 # TIME HANDLING
