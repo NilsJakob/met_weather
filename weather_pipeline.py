@@ -36,8 +36,6 @@ FORECAST_FILE = "forecast.csv"
 OBS_FILE = "observations.csv"
 
 
-#FORECAST_FILE = os.path.join(BASE_PATH, "forecast.csv")
-#OBS_FILE = os.path.join(BASE_PATH, "observations.csv")
 
 
 # ======================
