@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+os.chdir(BASE_DIR)
+
 FORECAST_FILE = os.path.join(BASE_DIR, "forecast.csv")
 OBS_FILE = os.path.join(BASE_DIR, "observations.csv")
 
@@ -132,19 +134,25 @@ def run():
         # ======================
         # OBSERVATION
         # ======================
-        obs = parse(timeseries[0])
+        rows = []
 
-        obs_df = pd.DataFrame([{
-            "time_utc": obs["time_utc"],
-            "time_local": obs["time_local"],
-            "temperature": obs["temperature"],
-            "wind": obs["wind"],
-            "humidity": obs["humidity"],
-            "irradiance": obs["irradiance"]
-        }])
+        for ts in timeseries:
+            obs = parse(ts)
 
+            rows.append({
+                "time_utc": obs["time_utc"],
+                "time_local": obs["time_local"],
+                "temperature": obs["temperature"],
+                "wind": obs["wind"],
+                "humidity": obs["humidity"],
+                "irradiance": obs["irradiance"]
+            })
+
+        obs_df = pd.DataFrame(rows)
         safe_write(obs_df, OBS_FILE)
 
+
+        
         # ======================
         # FORECAST
         # ======================
@@ -199,3 +207,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

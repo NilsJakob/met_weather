@@ -3,8 +3,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import time
 import os
-
 import requests
+from datetime import datetime
+
+
+if st.button("🔄 Force refresh"):
+    st.cache_data.clear()
+
+
+
+
 
 LAT = 59.137344
 LON = 9.671435
@@ -46,67 +54,169 @@ def load_nowcast():
     return pd.DataFrame(rows)
 
 
-FORECAST_FILE = "forecast.csv"
-OBS_FILE = "observations.csv"
+import streamlit as st
+import pandas as pd
+import requests
+from io import StringIO
 
-st.set_page_config(page_title="Weather Dashboard", layout="wide")
+# -------------------------
+# URLs
+# -------------------------
+FORECAST_FILE = "https://raw.githubusercontent.com/NilsJakob/met_weather/main/forecast.csv"
+OBS_FILE = "https://raw.githubusercontent.com/NilsJakob/met_weather/main/observations.csv"
 
-st.title("🌦️ Weather Forecast Dashboard (USN smart grid LAB)")
+# -------------------------
+# Helper functions
+# -------------------------
+def read_csv_url(url):
+    response = requests.get(url)
+    response.raise_for_status()
+    return pd.read_csv(StringIO(response.text))
 
-# Auto-refresh
-st.caption("Auto-updates every 60 seconds")
-time.sleep(1)
+def fix_time_column(df):
+    df.columns = df.columns.str.strip().str.lower()
+    if "time_utc" in df.columns:
+        df["time_utc"] = pd.to_datetime(df["time_utc"], utc=True)
+        return df
+    if "target_time_utc" in df.columns:
+        df["time_utc"] = pd.to_datetime(df["target_time_utc"], utc=True)
+        return df
+    raise ValueError("No valid time column")
 
-
+# -------------------------
+# Load data
+# -------------------------
 @st.cache_data(ttl=60)
-
-
 def load_data():
-    f = pd.read_csv(FORECAST_FILE)
-    o = pd.read_csv(OBS_FILE)
-
-    # ✅ FIX: convert to datetime
-    f["target_time_utc"] = pd.to_datetime(f["target_time_utc"], utc=True)
-    o["time_utc"] = pd.to_datetime(o["time_utc"], utc=True)
-
+    f = read_csv_url(FORECAST_FILE)
+    o = read_csv_url(OBS_FILE)
     return f, o
 
+# -------------------------
+# Merge
+# -------------------------
+def merge_data(f, o):
+    f = fix_time_column(f)
+    o = fix_time_column(o)
 
-  
-def merge_data():
-    f, o = load_data()
-
-    f = f.sort_values("target_time_utc")
-    o = o.sort_values("time_utc")
-
-    df = pd.merge_asof(
-        f,
-        o,
-        left_on="target_time_utc",
-        right_on="time_utc",
-        direction="nearest",
-        tolerance=pd.Timedelta("2H"),
+    df = pd.merge(
+        f, o,
+        on="time_utc",
+        how="inner",
         suffixes=("_fc", "_obs")
     )
+    return df
 
-    print("Columns after merge:", df.columns)
+# -------------------------
+# MAIN
+# -------------------------
+f, o = load_data()
 
-    # ✅ Safe cleaning
-    if "temperature_obs" in df.columns:
-        df = df.dropna(subset=["temperature_obs"])
-    else:
-        print("⚠️ No observation matches yet")
+df = merge_data(f, o)
+
+st.dataframe(df)
+
+if f is None or o is None:
+    st.error("Failed to load data")
+    st.stop()
+
+
+# ✅ Everything below can safely use f and o
+st.title("Weather Dashboard")
+
+st.write("Forecast data:")
+st.dataframe(f)
+
+st.write("Observation data:")
+st.dataframe(o)
+
+
+#st.write("Forecast columns:", f.columns.tolist())
+#st.write("Obs columns:", o.columns.tolist())
+
+  
+def merge_data(f, o):
+    f = f.copy()
+    o = o.copy()
+
+    st.write("Columns BEFORE fix (forecast):", f.columns.tolist())
+    st.write("Obs columns:", o.columns.tolist())
+
+    f = fix_time_column(f)
+    o = fix_time_column(o)
+
+    df = pd.merge(
+        f,
+        o,
+        on="time_utc",
+        how="inner",
+        suffixes=("_fc", "_obs")
+    )
 
     return df
 
 
+f, o = load_data()
 
-df = merge_data()
+if f is None or o is None:
+    st.error("Failed to load data")
+    st.stop()
+
+df = merge_data(f, o)
+
+st.dataframe(df)
+
+
+df = merge_data(f, o)
 nowcast_df = load_nowcast()
 
 if df is None or len(df) < 1:
     st.warning("Not enough data yet. Come back later.")
     st.stop()
+
+# ✅ data update time
+if not df.empty:
+    last_update = pd.to_datetime(df["time_utc"]).max()
+    last_update_local = last_update.tz_convert("Europe/Oslo")
+
+    st.caption(f"🕒 Last data update: {last_update_local.strftime('%Y-%m-%d %H:%M')}")
+
+
+st.write(df.head())
+st.write("Rows:", len(df))
+
+
+from datetime import datetime
+import pandas as pd
+
+# ✅ last update
+last_update = pd.to_datetime(df["time_utc"]).max()
+last_update_local = last_update.tz_convert("Europe/Oslo")
+
+st.caption(f"🕒 Last data update: {last_update_local.strftime('%Y-%m-%d %H:%M')}")
+
+# ✅ thresholds
+fresh_threshold = pd.Timedelta("2H")
+warning_threshold = pd.Timedelta("4H")
+
+# ✅ delay calculation
+now_local = datetime.now(last_update_local.tzinfo)
+delay = now_local - last_update_local
+
+minutes = int(delay.total_seconds() / 60)
+hours = minutes // 60
+delay_str = f"{hours}h {minutes % 60}m"
+
+# ✅ indicator
+if delay <= fresh_threshold:
+    st.success(f"🟢 Data is up-to-date (delay: {delay_str})")
+
+elif delay <= warning_threshold:
+    st.warning(f"🟡 Data is slightly delayed (delay: {delay_str})")
+
+else:
+    st.error(f"🔴 Data is outdated (delay: {delay_str})")
+
 
 
 # ✅ METRICS
@@ -117,6 +227,47 @@ latest = df.iloc[-1]
 col1.metric("Temp Forecast", f"{latest['temperature_fc']:.1f} °C")
 col2.metric("Temp Observed", f"{latest['temperature_obs']:.1f} °C")
 col3.metric("Error", f"{latest['temperature_fc'] - latest['temperature_obs']:.2f} °C")
+
+df["error"] = df["temperature_fc"] - df["temperature_obs"]
+
+# ✅ Metrics
+mae = df["error"].abs().mean()
+rmse = (df["error"]**2).mean()**0.5
+bias = df["error"].mean()
+st.subheader("📊 Forecast Performance")
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("MAE (°C)", f"{mae:.2f}")
+col2.metric("RMSE (°C)", f"{rmse:.2f}")
+col3.metric("Bias (°C)", f"{bias:.2f}")
+
+st.subheader("📊 Performance by Lead Time")
+
+grouped = df.groupby("lead_hours")["error"]
+
+mae_by_lead = grouped.apply(lambda x: x.abs().mean())
+rmse_by_lead = grouped.apply(lambda x: (x**2).mean()**0.5)
+
+for lead in mae_by_lead.index:
+    st.write(f"Lead {lead}h → MAE: {mae_by_lead[lead]:.2f}, RMSE: {rmse_by_lead[lead]:.2f}")
+
+
+st.subheader("📈 Error Distribution")
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+ax.hist(df["error"], bins=20)
+
+ax.set_xlabel("Error (°C)")
+ax.set_ylabel("Frequency")
+
+st.pyplot(fig)
+
+
+
+
 
 
 # ✅ TEMPERATURE PLOT
@@ -191,3 +342,11 @@ else:
     plt.xticks(rotation=30)
 
     st.pyplot(fig)
+
+
+latest_time = df["time_utc"].max()
+now = pd.Timestamp.utcnow()
+
+st.write("Now (UTC):", now)
+st.write("Latest data time:", latest_time)
+st.write("Delay:", now - latest_time)
