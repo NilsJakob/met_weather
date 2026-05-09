@@ -214,12 +214,35 @@ def parse_observations(data, station_id, reason):
 def save_data(df, filename):
     try:
         old = pd.read_csv(filename)
+
+        # ✅ Ensure same columns
+        df = df[old.columns]
+
         df = pd.concat([old, df])
     except:
         pass
 
-    df = df.drop_duplicates()
-    df.to_csv(filename, index=False)
+    # ✅ Remove duplicates
+    if "time_utc" in df.columns:
+        df = df.drop_duplicates(subset=["time_utc"])
+
+    # ✅ Sort
+    # ✅ Ensure time is datetime
+    if "time_utc" in df.columns:
+        df["time_utc"] = pd.to_datetime(df["time_utc"], errors="coerce", utc=True)
+
+# ✅ Drop bad timestamps
+    df = df.dropna(subset=["time_utc"])
+
+# ✅ Remove duplicates
+    if "station_id" in df.columns:
+        df = df.drop_duplicates(subset=["time_utc", "station_id"])
+    else:
+        df = df.drop_duplicates(subset=["time_utc"])
+
+    # ✅ Sort AFTER cleaning
+    df = df.sort_values("time_utc")
+
 
     print(f"✅ Saved {filename}")
 
