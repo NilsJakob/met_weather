@@ -8,11 +8,15 @@ from dotenv import load_dotenv
 # LOAD ENV
 # ======================
 
+
 load_dotenv()
 
 FROST_CLIENT_ID = os.getenv("FROST_CLIENT_ID")
 
-print("DEBUG FROST:", FROST_CLIENT_ID)
+if not FROST_CLIENT_ID:
+    raise ValueError("❌ Missing FROST_CLIENT_ID (check .env locally or GitHub Secrets)")
+
+
 
 test_url = "https://frost.met.no/sources/v0.jsonld"
 
