@@ -21,8 +21,14 @@ jobs:
       with:
         python-version: "3.11"
 
+    - name: Debug files
+      run: |
+        pwd
+        ls -la 
+        
     - name: Install dependencies
       run: |
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: Run pipeline
@@ -30,3 +36,8 @@ jobs:
         FROST_CLIENT_ID: ${{ secrets.FROST_CLIENT_ID }}
       run: |
         python weather_pipeline.py
+
+        
+    - name: Debug files
+      run: |
+        ls -la
