@@ -16,29 +16,32 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v3
 
+    - name: Show files (DEBUG)
+      run: |
+        echo "Current directory:"
+        pwd
+        echo "Files:"
+        ls -la
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: "3.11"
 
-    - name: Debug files
+    - name: Install dependencies (FORCED)
       run: |
-        pwd
-        ls -la 
-        
-   
-      - name: Install dependencies
-      run: |
+        python -m pip install --upgrade pip
         pip install pandas requests python-dotenv matplotlib
 
-
-    - name: Run pipeline
-      env:
+    - name: Check installed packages (DEBUG)
+        pip list
+    - name: Test dotenv import (CRITICAL)
+      run: |
+        python weather_pipeline.py    - name: Run pipeline
         FROST_CLIENT_ID: ${{ secrets.FROST_CLIENT_ID }}
       run: |
-        python weather_pipeline.py
+      env:
 
-        
-    - name: Debug files
-      run: |
-        ls -la
+        python -c "from dotenv import load_dotenv; print('dotenv works ✅')"
+
+
