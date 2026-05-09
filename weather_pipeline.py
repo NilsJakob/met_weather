@@ -1,210 +1,243 @@
 import requests
 import pandas as pd
+from datetime import datetime, timedelta
 import os
-import time
-import subprocess
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
 
+# ======================
+# LOAD ENV
+# ======================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv()
 
-os.chdir(BASE_DIR)
+FROST_CLIENT_ID = os.getenv("FROST_CLIENT_ID")
 
-FORECAST_FILE = os.path.join(BASE_DIR, "forecast.csv")
-OBS_FILE = os.path.join(BASE_DIR, "observations.csv")
+print("DEBUG FROST:", FROST_CLIENT_ID)
 
+test_url = "https://frost.met.no/sources/v0.jsonld"
 
+r = requests.get(test_url, auth=(FROST_CLIENT_ID, ""))
 
-print("✅ Using working directory:", os.getcwd())
+print("TEST STATUS:", r.status_code)
+print("TEST RESPONSE:", r.text[:200])
 
-
+if not FROST_CLIENT_ID:
+    raise ValueError("❌ Missing FROST_CLIENT_ID in .env")
 
 # ======================
 # CONFIG
 # ======================
-#59.137344, 9.671435
+
 LAT = 59.137344
 LON = 9.671435
 
-URL = f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={LAT}&lon={LON}"
-
-HEADERS = {
-    "User-Agent": "usn_smart_grid_lab_porsgrunn nils.j.johannesen@usn.no"
-}
-
+DEFAULT_STATION = "SN17850"
 
 FORECAST_FILE = "forecast.csv"
 OBS_FILE = "observations.csv"
 
+# ======================
+# FORECAST (MET)
+# ======================
 
+def get_forecast():
+    print("🔄 Fetching forecast...")
+
+    url = f"https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={LAT}&lon={LON}"
+    headers = {"User-Agent": "weather-pipeline"}
+
+    r = requests.get(url, headers=headers)
+
+    if r.status_code != 200:
+        raise Exception(f"Forecast error: {r.status_code}")
+
+    data = r.json()
+
+    rows = []
+
+    for ts in data["properties"]["timeseries"]:
+        details = ts["data"]["instant"]["details"]
+
+        rows.append({
+            "time_utc": ts["time"],
+            "temperature_fc": details.get("air_temperature"),
+            "wind_fc": details.get("wind_speed"),
+        })
+
+    df = pd.DataFrame(rows)
+    df["time_utc"] = pd.to_datetime(df["time_utc"], utc=True)
+
+    print("✅ Forecast rows:", len(df))
+    return df
 
 
 # ======================
-# TIME HANDLING
+# STATION LOGIC
 # ======================
 
-def add_time_fields(utc_string):
-    dt_utc = datetime.fromisoformat(utc_string.replace("Z", "+00:00"))
-    dt_local = dt_utc.astimezone(ZoneInfo("Europe/Oslo"))
+def get_nearest_station_raw():
+    url = "https://frost.met.no/sources/v0.jsonld"
 
-    return dt_utc.isoformat(), dt_local.isoformat()
-
-
-# ======================
-# PARSE DATA
-# ======================
-
-def parse(ts):
-    d = ts["data"]["instant"]["details"]
-    t_utc, t_local = add_time_fields(ts["time"])
-
-    return {
-        "time_utc": t_utc,
-        "time_local": t_local,
-        "temperature": d["air_temperature"],
-        "wind": d["wind_speed"],
-        "humidity": d["relative_humidity"],
-        "irradiance": d.get("surface_downwelling_shortwave_flux_in_air", None)
+    params = {
+        "geometry": f"nearest(POINT({LON} {LAT}))",
+        "nearestmaxcount": 1
     }
 
+    r = requests.get(url, params=params, auth=(FROST_CLIENT_ID, ""))
 
-# ======================
-# SAFE FILE WRITE
-# ======================
+    if r.status_code != 200:
+        raise Exception("Station lookup failed")
 
-def safe_write(df, filename):
-    for _ in range(5):
-        try:
-            df.to_csv(
-                filename,
-                mode="a",
-                header=not os.path.exists(filename),
-                index=False
-            )
-            return
-        except PermissionError:
-            print(f"File {filename} is locked, retrying...")
-            time.sleep(2)
-
-    raise Exception(f"Could not write to {filename}")
+    data = r.json()
+    return data["data"][0]["id"]
 
 
-# ======================
-# GITHUB PUSH
-# ======================
+def has_recent_data(station_id):
+    url = "https://frost.met.no/observations/v0.jsonld"
 
-def git_push():
+    end = datetime.utcnow()
+    start = end - timedelta(hours=6)
+
+    params = {
+        "sources": station_id,
+        "elements": "air_temperature",
+        "referencetime": f"{start.isoformat()}/{end.isoformat()}"
+    }
+
+    r = requests.get(url, params=params, auth=(FROST_CLIENT_ID, ""))
+
+    if r.status_code != 200:
+        return False
+
+    data = r.json()
+    return len(data.get("data", [])) > 0
+
+
+def get_nearest_station_with_data():
+    url = "https://frost.met.no/sources/v0.jsonld"
+
+    params = {
+        "geometry": f"nearest(POINT({LON} {LAT}))",
+        "elements": "air_temperature",
+        "nearestmaxcount": 1
+    }
+
+    r = requests.get(url, params=params, auth=(FROST_CLIENT_ID, ""))
+
+    if r.status_code != 200:
+        raise Exception("Fallback station lookup failed")
+
+    data = r.json()
+    return data["data"][0]["id"]
+
+
+def select_station():
     try:
-        subprocess.run(["git", "add", "."], check=True)
+        raw_station = get_nearest_station_raw()
 
-        # Only commit if changes exist
-        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        if has_recent_data(raw_station):
+            print("✅ Using closest station:", raw_station)
+            return raw_station, "closest"
 
-        if result.returncode == 1:
-            subprocess.run(
-                ["git", "commit", "-m", f"Auto update {datetime.now()}"],
-                check=True
-            )
-            subprocess.run(["git", "push"], check=True)
-            print("✅ Changes pushed to GitHub")
-        else:
-            print("No changes to commit")
+        fallback = get_nearest_station_with_data()
+        print("⚠️ Using fallback station:", fallback)
+        return fallback, "fallback_data"
 
-    except Exception as e:
-        print("Git error:", e)
+    except Exception:
+        print("❌ API error → using default station")
+        return DEFAULT_STATION, "hard_fallback"
 
 
 # ======================
-# MAIN PIPELINE
+# OBSERVATIONS (FROST)
 # ======================
 
-def run():
+def get_observations(station_id):
+    print("🔄 Fetching observations...")
+
+    url = "https://frost.met.no/observations/v0.jsonld"
+
+    end = datetime.utcnow()
+    start = end - timedelta(hours=12)
+
+    params = {
+        "sources": station_id,
+        "elements": "air_temperature,wind_speed",  # ✅ include wind
+        "referencetime": f"{start.isoformat()}/{end.isoformat()}"
+    }
+
+    r = requests.get(url, params=params, auth=(FROST_CLIENT_ID, ""))
+
+    if r.status_code != 200:
+        raise Exception(f"Frost error: {r.status_code}")
+
+    return r.json()
+
+
+def parse_observations(data, station_id, reason):
+    rows = []
+
+    for entry in data["data"]:
+        values = {
+            obs["elementId"]: obs["value"]
+            for obs in entry["observations"]
+        }
+
+        rows.append({
+            "time_utc": entry["referenceTime"],
+            "temperature_obs": values.get("air_temperature"),
+            "wind_obs": values.get("wind_speed"),  # ✅ may be None
+            "station_id": station_id,
+            "station_reason": reason,
+            "timestamp_pipeline": datetime.utcnow()
+        })
+
+    df = pd.DataFrame(rows)
+
+    df["time_utc"] = pd.to_datetime(df["time_utc"], utc=True)
+    df = df.sort_values("time_utc")
+
+    print("✅ Observation rows:", len(df))
+    print("Latest obs:", df["time_utc"].max())
+
+    return df
+
+
+# ======================
+# SAVE
+# ======================
+
+def save_data(df, filename):
     try:
-        response = requests.get(URL, headers=HEADERS)
-        response.raise_for_status()
-        data = response.json()
+        old = pd.read_csv(filename)
+        df = pd.concat([old, df])
+    except:
+        pass
 
-        timeseries = data["properties"]["timeseries"]
+    df = df.drop_duplicates()
+    df.to_csv(filename, index=False)
 
-        # Run time
-        now_utc = datetime.now(timezone.utc).replace(microsecond=0)
-        now_local = now_utc.astimezone(ZoneInfo("Europe/Oslo"))
-
-        # ======================
-        # OBSERVATION
-        # ======================
-        rows = []
-
-        for ts in timeseries:
-            obs = parse(ts)
-
-            rows.append({
-                "time_utc": obs["time_utc"],
-                "time_local": obs["time_local"],
-                "temperature": obs["temperature"],
-                "wind": obs["wind"],
-                "humidity": obs["humidity"],
-                "irradiance": obs["irradiance"]
-            })
-
-        obs_df = pd.DataFrame(rows)
-        safe_write(obs_df, OBS_FILE)
-
-
-        
-        # ======================
-        # FORECAST
-        # ======================
-        fc1 = parse(timeseries[1])
-        fc24 = parse(timeseries[24])
-
-        forecast_df = pd.DataFrame([
-            {
-                "run_time_utc": now_utc.isoformat(),
-                "run_time_local": now_local.isoformat(),
-
-                "target_time_utc": fc1["time_utc"],
-                "target_time_local": fc1["time_local"],
-
-                "lead_hours": 1,
-                "temperature": fc1["temperature"],
-                "wind": fc1["wind"],
-                "humidity": fc1["humidity"],
-                "irradiance": fc1["irradiance"]
-            },
-            {
-                "run_time_utc": now_utc.isoformat(),
-                "run_time_local": now_local.isoformat(),
-
-                "target_time_utc": fc24["time_utc"],
-                "target_time_local": fc24["time_local"],
-
-                "lead_hours": 24,
-                "temperature": fc24["temperature"],
-                "wind": fc24["wind"],
-                "humidity": fc24["humidity"],
-                "irradiance": fc24["irradiance"]
-            }
-        ])
-
-        safe_write(forecast_df, FORECAST_FILE)
-
-        print(f"✅ Updated at {now_utc.isoformat()}")
-
-        # ======================
-        # GIT PUSH
-        # ======================
-        git_push()
-
-    except Exception as e:
-        print("Error:", e)
+    print(f"✅ Saved {filename}")
 
 
 # ======================
-# ENTRY POINT
+# MAIN
 # ======================
 
 if __name__ == "__main__":
-    run()
 
+    print("🚀 Running weather pipeline")
+
+    # Forecast
+    forecast_df = get_forecast()
+    save_data(forecast_df, FORECAST_FILE)
+
+    # Observations
+    station_id, reason = select_station()
+
+    frost_raw = get_observations(station_id)
+    obs_df = parse_observations(frost_raw, station_id, reason)
+
+    save_data(obs_df, OBS_FILE)
+
+    print("✅ Pipeline complete")
