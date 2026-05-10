@@ -48,6 +48,6 @@ jobs:
 
           git add forecast.csv observations.csv
 
-          git commit -m "Update weather data" || echo "No changes to commit"
+          git diff --cached --quiet || git commit -m "Update weather data"
 
-          git push
+          git push origin HEAD:main
