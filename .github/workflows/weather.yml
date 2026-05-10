@@ -1,47 +1,33 @@
 name: Weather Pipeline
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
   schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
+    - cron: "0 * * * *"   # ⏰ every hour
 
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Show files (DEBUG)
-      run: |
-        echo "Current directory:"
-        pwd
-        echo "Files:"
-        ls -la
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests python-dotenv matplotlib folium geopandas shapely
 
-    - name: Install dependencies (FORCED)
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas requests python-dotenv matplotlib
-
-    - name: Check installed packages (DEBUG)
-        pip list
-    - name: Test dotenv import (CRITICAL)
-      run: |
-        python weather_pipeline.py    - name: Run pipeline
-        FROST_CLIENT_ID: ${{ secrets.FROST_CLIENT_ID }}
-      run: |
-      env:
-
-        python -c "from dotenv import load_dotenv; print('dotenv works ✅')"
-
-
+      - name: Run pipeline
+        env:
+          FROST_CLIENT_ID: ${{ secrets.FROST_CLIENT_ID }}
+        run: |
+          python weather_pipeline.py
