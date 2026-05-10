@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+from datetime import datetime, UTC
 import os
 from dotenv import load_dotenv
 
@@ -99,7 +100,7 @@ def get_nearest_station_raw():
 def has_recent_data(station_id):
     url = "https://frost.met.no/observations/v0.jsonld"
 
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(hours=6)
 
     params = {
@@ -161,7 +162,7 @@ def get_observations(station_id):
 
     url = "https://frost.met.no/observations/v0.jsonld"
 
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(hours=12)
 
     params = {
@@ -193,7 +194,7 @@ def parse_observations(data, station_id, reason):
             "wind_obs": values.get("wind_speed"),  # ✅ may be None
             "station_id": station_id,
             "station_reason": reason,
-            "timestamp_pipeline": datetime.utcnow()
+            "timestamp_pipeline": datetime.now(UTC)
         })
 
     df = pd.DataFrame(rows)
@@ -212,40 +213,36 @@ def parse_observations(data, station_id, reason):
 # ======================
 
 def save_data(df, filename):
-    try:
-        old = pd.read_csv(filename)
+    import pandas as pd
+    import os
 
-        # ✅ Ensure same columns
-        df = df[old.columns]
-
-        df = pd.concat([old, df])
-    except:
-        pass
-
-    # ✅ Remove duplicates
-    if "time_utc" in df.columns:
-        df = df.drop_duplicates(subset=["time_utc"])
-
-    # ✅ Sort
-    # ✅ Ensure time is datetime
-    if "time_utc" in df.columns:
-        df["time_utc"] = pd.to_datetime(df["time_utc"], errors="coerce", utc=True)
-
-# ✅ Drop bad timestamps
+    # ✅ Clean incoming data
+    df["time_utc"] = pd.to_datetime(df["time_utc"], utc=True, errors="coerce")
     df = df.dropna(subset=["time_utc"])
 
-# ✅ Remove duplicates
-    if "station_id" in df.columns:
-        df = df.drop_duplicates(subset=["time_utc", "station_id"])
-    else:
-        df = df.drop_duplicates(subset=["time_utc"])
+    # ✅ Append if possible
+    if os.path.exists(filename):
+        old = pd.read_csv(filename)
 
-    # ✅ Sort AFTER cleaning
+        if sorted(old.columns) == sorted(df.columns):
+            old["time_utc"] = pd.to_datetime(old["time_utc"], utc=True, errors="coerce")
+
+            # ✅ align column order
+            old = old[sorted(old.columns)]
+            df = df[sorted(df.columns)]
+
+            df = pd.concat([old, df], ignore_index=True)
+        else:
+            print("⚠️ Schema mismatch → overwriting file")
+
+    # ✅ Final cleanup
+    df = df.drop_duplicates(subset=["time_utc"])
     df = df.sort_values("time_utc")
 
+    # ✅ Save
+    df.to_csv(filename, index=False)
 
-    print(f"✅ Saved {filename}")
-
+    print(f"✅ Saved {filename} with {len(df)} rows")
 
 # ======================
 # MAIN
